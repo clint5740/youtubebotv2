@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+#!/usr/bin/env python3
 import re
 
 import discord
@@ -11,6 +12,7 @@ import os
 import shutil
 import sys
 import subprocess as sp
+import random
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -29,6 +31,8 @@ except ValueError:
 
 bot = commands.Bot(command_prefix=PREFIX, intents=discord.Intents(voice_states=True, guilds=True, guild_messages=True, message_content=True))
 queues = {} # {server_id: 'queue': [(vid_file, info), ...], 'loop': bool}
+loop_modes = {}
+
 
 def main():
     if TOKEN is None:
@@ -144,6 +148,160 @@ async def loop(ctx: commands.Context, *args):
 
     await ctx.send('looping is now ' + ('on' if not loop else 'off'))
 
+# added commands not present in original
+
+@bot.command(name="pause", aliases=["pu"])
+async def pause(ctx: commands.Context):
+    voice_client = get_voice_client_from_channel_id(ctx.author.voice.channel.id)
+    if voice_client.is_playing():
+        voice_client.pause()
+        await ctx.send("Music paused.")
+    else:
+        await ctx.send("No music is currently playing.")
+
+@bot.command(name="unpause", aliases=["unp"])
+async def unpause(ctx: commands.Context):
+    voice_client = get_voice_client_from_channel_id(ctx.author.voice.channel.id)
+    if voice_client.is_paused():
+        voice_client.resume()
+        await ctx.send("Music resumed.")
+    else:
+        await ctx.send("Music is not paused.")
+
+@bot.command(name="exit", aliases=["e"])
+async def exit(ctx: commands.Context):
+    voice_client = get_voice_client_from_channel_id(ctx.author.voice.channel.id)
+    if voice_client is not None:
+        server_id = ctx.guild.id
+        queues.pop(server_id, None)  # Clear the queue
+        loop_modes[server_id] = "off"  # Set loop mode to "off"
+        await voice_client.disconnect()  # Disconnect from the voice channel
+        await ctx.send("Bot has left the voice channel and the queue has been cleared.")
+    else:
+        await ctx.send("Bot is not currently in a voice channel.")
+
+@bot.command(name="current", aliases=["c"])
+async def current(ctx: commands.Context):
+    try:
+        queue = queues[ctx.guild.id]
+    except KeyError:
+        queue = None
+
+    if queue is None or len(queue) == 0:
+        await ctx.send("No song is currently playing.")
+    else:
+        current_song = queue[0]
+        title = current_song[1]["title"]
+        video_id = current_song[1]["id"]
+        youtube_link = f"https://youtu.be/{video_id}"
+        embed_var = discord.Embed(color=COLOR, title="Currently Playing")
+        embed_var.add_field(name="Title:", value=title, inline=False)
+        embed_var.add_field(name="YouTube Link:", value=youtube_link, inline=False)
+        await ctx.send(embed=embed_var)
+
+    if not await sense_checks(ctx):
+        return
+
+@bot.command(name="move", aliases=["m"])
+async def move(
+    ctx: commands.Context, queue_number: str = None, new_position: str = None
+):
+
+    # Check if both queue_number and new_position are provided
+    if queue_number is None or new_position is None:
+        await ctx.send("Please provide both the queue number and the new position.")
+        return
+
+    # Get the server ID
+    server_id = ctx.guild.id
+
+    try:
+        # Get the queue for the server ID
+        queue = queues[server_id]
+    except KeyError:
+        await ctx.send("The bot isn't playing anything")
+        return
+
+    # Get the length of the queue
+    queue_length = len(queue)
+
+    try:
+        # Convert queue_number and new_position to integers
+        queue_number = int(queue_number)
+        new_position = int(new_position)
+    except ValueError:
+        await ctx.send("Invalid input. Please provide valid queue numbers")
+        return
+
+    # Validate the queue_number and new_position
+    if (
+        queue_number < 1
+        or queue_number > queue_length
+        or new_position < 1
+        or new_position > queue_length
+    ):
+        await ctx.send("Invalid queue number or new position.")
+        return
+
+    # Check if the song is already in the specified position
+    if queue_number == new_position:
+        await ctx.send("The song is already in the specified position.")
+        return
+
+    # Move the song to the new position in the queue
+    song = queue.pop(queue_number - 1)
+    queue.insert(new_position - 1, song)
+
+    await ctx.send(
+        f"Moved song from position {queue_number} to {new_position} in the queue."
+    )
+
+
+@bot.command(name="shuffle", aliases=["sh"])
+async def shuffle(ctx: commands.Context):
+    try:
+        queue = queues[ctx.guild.id]
+    except KeyError:
+        await ctx.send("The bot isn't playing anything.")
+        return
+
+    if len(queue) <= 1:
+        await ctx.send("Not enough songs in the queue to shuffle.")
+        return
+
+    current_song = queue[0]  # Get the currently playing song (position 0)
+    remaining_songs = queue[
+        1:
+    ]  # Get the remaining songs in the queue (excluding the currently playing song)
+    random.shuffle(remaining_songs)  # Shuffle the remaining songs
+    queue = [
+        current_song
+    ] + remaining_songs  # Create a new queue with the shuffled songs
+
+    queues[ctx.guild.id] = queue  # Update the queue in the dictionary
+
+    await ctx.send("Queue shuffled.")
+
+
+@bot.command(name="clear", aliases=["cl"])
+async def clear(ctx: commands.Context):
+    try:
+        queue = queues[ctx.guild.id]
+    except KeyError:
+        await ctx.send("The bot isn't playing anything")
+        return
+
+    current_song = queue[0]  # Get the currently playing song
+    queues[ctx.guild.id] = [
+        current_song
+    ]  # Replace the queue with only the current song
+
+    await ctx.send("Queue cleared.")
+
+
+
+
+
 def get_voice_client_from_channel_id(channel_id: int):
     for voice_client in bot.voice_clients:
         if voice_client.channel.id == channel_id:
@@ -223,6 +381,7 @@ async def notify_about_failure(ctx: commands.Context, err: yt_dlp.utils.Download
     else:
         await ctx.send('sorry, failed to download this video')
     return
+
 
 if __name__ == '__main__':
     try:
