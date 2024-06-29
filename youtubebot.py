@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-#!/usr/bin/env python3
 import re
 
 import discord
@@ -357,7 +356,7 @@ async def on_voice_state_update(member: discord.User, before: discord.VoiceState
 @bot.event
 async def on_command_error(ctx: discord.ext.commands.Context, err: discord.ext.commands.CommandError):
     # now we can handle command errors
-    if isinstance(err, discord.ext.commands.errors.CommandNotFound):
+    if isinstance(err, discord.ext.commands.CommandError):
         if BOT_REPORT_COMMAND_NOT_FOUND:
             await ctx.send("command not recognized. To see available commands type {}help".format(PREFIX))
         return
